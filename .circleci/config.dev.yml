@@ -1,0 +1,52 @@
+version: 2
+jobs:
+  # Name of the job
+  build:
+    docker:
+      #- image:  # Primary container
+      - image: vitr/casperjs
+    steps:
+      ## Steps of the job
+      - checkout
+      - run:
+          name: Replace Auth0 test credentials
+          command: |
+            mv 01-Login/src/app/auth/auth0-variables.ts.example 01-Login/src/app/auth/auth0-variables.ts
+            sed -i 's/{CLIENT_ID}/$AUTH0_TEST_CLIENT_ID/g' 01-Login/src/app/auth/auth0-variables.ts
+            sed -i 's/{DOMAIN}/$AUTH0_TEST_DOMAIN/g' 01-Login/src/app/auth/auth0-variables.ts
+      - setup_remote_docker
+      - run:
+          name: Install curl    ## This should be done in the docker image
+          command: |
+            apt-get update
+            apt-get install curl -y
+      - run:
+          name: Install Docker client
+          command: |
+            set -x
+            VER="17.03.0-ce"
+            curl -L -o /tmp/docker-$VER.tgz https://download.docker.com/linux/static/stable/x86_64/docker-$VER.tgz
+            tar -xz -C /tmp -f /tmp/docker-$VER.tgz
+            mv /tmp/docker/* /usr/bin
+      - run:
+          name: Build PR Docker image
+          command: |
+            docker build -t $CIRCLE_PROJECT_REPONAME 01-Login/.
+      - run:
+          name: Run PR Docker image
+          command: |
+            docker run -d -p 3000:3000 -it $CIRCLE_PROJECT_REPONAME
+          #background: true
+      - run:
+          name: Wait for app to be available
+          command: |
+            docker run waisbrot/wait -e TARGETS=localhost:3000 -e TIMEOUT=300
+      - run:
+          name: Run CasperJS tests
+          command: |
+            wget -O tests.js https://gist.githubusercontent.com/lbalmaceda/3cef267b6bed563d5009a1ca851bac87/raw/ca629d7aa6cdd68b52e87b3cfa3f7f7a809dd297/webapp-test.js
+            casperjs test tests.js --fail-fast --initial-url=http://localhost:3000
+      - run:
+          name: Stop PR Docker image
+          command: |
+            docker stop $(docker ps -q --filter ancestor=$CIRCLE_PROJECT_REPONAME)
